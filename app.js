@@ -2,9 +2,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const peer = new Peer({
         config: {
             'iceServers': [
-                { "url": "stun:stun.l.google.com:19302"}
+                { "urls": "stun:stun.l.google.com:19302" },
+                { "urls": "stun:stun1.l.google.com:19302" },
+                { "urls": "stun:stun2.l.google.com:19302" },
+                { "urls": "stun:stun3.l.google.com:19302" },
+                { "urls": "stun:stun4.l.google.com:19302" },
+                { "urls": "stun:stun.openrelay.metered.ca:80" }
             ]
-        }
+        },
+        debug: 2
     });
     let conn;
     let host = false;
@@ -28,14 +34,53 @@ document.addEventListener("DOMContentLoaded", () => {
 
     peer.on('open', id => {
         peerId = id;
+        console.log('My peer ID is: ' + id);
+    });
+
+    peer.on('error', err => {
+        console.error('PeerJS error:', err);
+        let errorMsg = "An error occurred.";
+        if (err.type === 'peer-unavailable') {
+            errorMsg = "Peer not found. Please check the ID.";
+        } else if (err.type === 'network') {
+            errorMsg = "Network error. Please check your connection.";
+        } else if (err.type === 'browser-incompatible') {
+            errorMsg = "Your browser does not support WebRTC.";
+        } else if (err.type === 'disconnected') {
+            errorMsg = "You are disconnected from the signaling server.";
+        }
+
+        newMessage.textContent = errorMsg;
+        chatBox.appendChild(newMessage.cloneNode(true));
+    });
+
+    peer.on('disconnected', () => {
+        console.log('Connection to signaling server lost. Attempting to reconnect...');
+        newMessage.textContent = "Disconnected from server. Reconnecting...";
+        chatBox.appendChild(newMessage.cloneNode(true));
+        peer.reconnect();
     });
 
     peer.on('connection', connection => {
         conn = connection;
-        conn.on('data', handleData);
+        setupConnection();
         newMessage.textContent = "A new user has connected.";
-        chatBox.appendChild(newMessage);
+        chatBox.appendChild(newMessage.cloneNode(true));
     });
+
+    function setupConnection() {
+        conn.on('data', handleData);
+        conn.on('close', () => {
+            newMessage.textContent = "Connection closed.";
+            chatBox.appendChild(newMessage.cloneNode(true));
+            conn = null;
+        });
+        conn.on('error', (err) => {
+            console.error("Connection error:", err);
+            newMessage.textContent = "Connection error occurred.";
+            chatBox.appendChild(newMessage.cloneNode(true));
+        });
+    }
 
     // createRoomBtn.addEventListener("click", () => {
     //     host = true;
@@ -105,7 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
             case 'file-selected':
                 alert("The host has selected a video file. Please select the same file to synchronize playback.");
                 newMessage.textContent = "The host has selected a video file. Please select the same file to synchronize playback.";
-                chatBox.appendChild(newMessage);
+                chatBox.appendChild(newMessage.cloneNode(true));
                 break;
             case 'chat':
                 appendMessage(data.message, false);
@@ -114,7 +159,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function broadcast(data) {
-        if (conn) {
+        if (conn && conn.open) {
             conn.send(data);
         }
     }
@@ -125,7 +170,7 @@ document.addEventListener("DOMContentLoaded", () => {
             host = true;
             chatBox.innerHTML = '';
             newMessage.textContent = "Room created. Share this ID with your friend: " + peerId;
-            chatBox.appendChild(newMessage);
+            chatBox.appendChild(newMessage.cloneNode(true));
             chatMessageInput.value = '';
         }
         if (message.startsWith('/join')) {
@@ -135,22 +180,23 @@ document.addEventListener("DOMContentLoaded", () => {
             if (arg && !host) {
                 conn = peer.connect(arg);
                 conn.on('open', () => {
-                    conn.on('data', handleData);
+                    setupConnection();
                     chatBox.innerHTML = '';
-                    newMessage.textContent = "Connected to the room.: " + arg
-                    chatBox.appendChild(newMessage);
+                    newMessage.textContent = "Connected to the room: " + arg
+                    chatBox.appendChild(newMessage.cloneNode(true));
                     chatMessageInput.value = '';
                 });
-                conn.on('error', () => {
+                conn.on('error', (err) => {
+                    console.error("Connection attempt error:", err);
                     chatBox.innerHTML = '';
                     newMessage.textContent = "Error occurred while connecting. Try again.";
-                    chatBox.appendChild(newMessage);
+                    chatBox.appendChild(newMessage.cloneNode(true));
                     chatMessageInput.value = '';
                 });
             } else {
                 chatBox.innerHTML = '';
                 newMessage.textContent = "Invalid or missing invite code.";
-                chatBox.appendChild(newMessage);
+                chatBox.appendChild(newMessage.cloneNode(true));
                 chatMessageInput.value = '';
             }
         }
@@ -159,30 +205,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (conn) conn.close();
                 chatBox.innerHTML = '';
                 newMessage.textContent = "You have left the room.";
-                chatBox.appendChild(newMessage);
+                chatBox.appendChild(newMessage.cloneNode(true));
                 chatMessageInput.value = '';
             } else {
                 newMessage.textContent = "You are the host and cannot leave the room.";
                 chatMessageInput.value = '';
+                chatBox.appendChild(newMessage.cloneNode(true));
             }
         }
         if (message.startsWith('/status')) {
-            if (!conn) {
+            if (!conn || !conn.open) {
                 newMessage.textContent = "Status: Disconnected";
-                chatBox.appendChild(newMessage);
-                chatMessageInput.value = '';
             } else {
                 newMessage.textContent = "Status: Connected";
-                chatBox.appendChild(newMessage);
-                chatMessageInput.value = '';
             }
-        }
-        if (message.startsWith('/info') && host) {
-            newMessage.textContent = "Your the the host: " + peerId ;
-            chatBox.appendChild(newMessage);
+            chatBox.appendChild(newMessage.cloneNode(true));
             chatMessageInput.value = '';
         }
-        if (message && conn && !message.startsWith('/')) {
+        if (message.startsWith('/info') && host) {
+            newMessage.textContent = "Your are the host: " + peerId ;
+            chatBox.appendChild(newMessage.cloneNode(true));
+            chatMessageInput.value = '';
+        }
+        if (message && conn && conn.open && !message.startsWith('/')) {
             broadcast({ type: 'chat', message });
             appendMessage(message, true);
             chatMessageInput.value = '';
