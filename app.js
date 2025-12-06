@@ -35,6 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const streamUrlInput = document.getElementById("stream-url-input");
     const streamUrlBtn = document.getElementById("stream-url-btn");
     const videoContainer = document.getElementById("video-container");
+    const videoOverlay = document.getElementById("video-overlay"); // Get overlay element
 
     let peerId = '';
     let playerType = 'html5'; // 'html5', 'youtube', 'vidking'
@@ -77,6 +78,11 @@ document.addEventListener("DOMContentLoaded", () => {
         setupConnection();
         newMessage.textContent = "A new user has connected.";
         chatBox.appendChild(newMessage.cloneNode(true));
+        
+        // If we are host, ensure we stay in control
+        if (host) {
+            updateHostControls();
+        }
     });
 
     function setupConnection() {
@@ -93,6 +99,26 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // --- Control Management ---
+
+    function updateHostControls() {
+        if (host) {
+            // Host: Hide overlay, Enable controls
+            videoOverlay.style.display = 'none';
+            if (playerType === 'html5') {
+                video.setAttribute('controls', 'true');
+            }
+            // For YouTube, we might need to recreate to show controls, 
+            // but usually just hiding the overlay is enough for the host.
+        } else {
+            // Peer: Show overlay, Disable controls
+            videoOverlay.style.display = 'block';
+            if (playerType === 'html5') {
+                video.removeAttribute('controls');
+            }
+        }
+    }
+
     // --- Video Player Management ---
 
     function loadVideo(type, src) {
@@ -102,13 +128,14 @@ document.addEventListener("DOMContentLoaded", () => {
         video.style.display = 'none';
         const ytElem = document.getElementById('youtube-player');
         if (ytElem) ytElem.style.display = 'none';
-        // Clear Vidking iframe if exists
+        
         const oldVk = document.querySelector('.vidking-embed');
         if (oldVk) oldVk.remove();
 
         if (type === 'html5') {
             video.style.display = 'block';
             video.src = src;
+            updateHostControls(); // Apply controls based on role
         } else if (type === 'youtube') {
             if (ytElem) ytElem.style.display = 'block';
             if (youtubePlayer && youtubePlayer.loadVideoById) {
@@ -116,6 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 createYouTubePlayer(src);
             }
+            updateHostControls();
         } else if (type === 'vidking') {
             const iframe = document.createElement('iframe');
             iframe.src = src;
@@ -125,16 +153,15 @@ document.addEventListener("DOMContentLoaded", () => {
             iframe.style.height = '100%';
             iframe.style.border = 'none';
             videoContainer.appendChild(iframe);
+            updateHostControls(); // Overlay will block interaction
         }
     }
 
     function createYouTubePlayer(videoId) {
-        // Destroy existing player if needed to reset
         if (youtubePlayer && typeof youtubePlayer.destroy === 'function') {
             youtubePlayer.destroy();
         }
 
-        // Ensure the div exists
         let ytContainer = document.getElementById('youtube-player');
         if (!ytContainer) {
              ytContainer = document.createElement('div');
@@ -143,24 +170,25 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         ytContainer.style.display = 'block';
 
+        // Set controls based on host status
+        const playerVars = {
+            'playsinline': 1,
+            'controls': host ? 1 : 0, // Hide controls for peers
+            'disablekb': host ? 0 : 1, // Disable keyboard for peers
+            'rel': 0
+        };
+
         if (window.YT && window.YT.Player) {
             youtubePlayer = new YT.Player('youtube-player', {
                 height: '100%',
                 width: '100%',
                 videoId: videoId,
-                playerVars: {
-                    'playsinline': 1,
-                    'controls': 1
-                },
+                playerVars: playerVars,
                 events: {
                     'onReady': onPlayerReady,
                     'onStateChange': onPlayerStateChange
                 }
             });
-        } else {
-            console.error("YouTube IFrame API not ready yet.");
-            // Retry logic could go here, but usually scripts load fast enough.
-            // Or use onYouTubeIframeAPIReady global callback.
         }
     }
 
@@ -182,6 +210,9 @@ document.addEventListener("DOMContentLoaded", () => {
     video.addEventListener("play", () => {
         if (host && playerType === 'html5') {
             broadcast({ type: 'play', time: video.currentTime });
+        } else if (!host && playerType === 'html5') {
+            // If peer manages to click play (e.g. via keyboard before overlay), force pause?
+            // The overlay prevents this, but good to be safe.
         }
     });
 
@@ -214,7 +245,6 @@ document.addEventListener("DOMContentLoaded", () => {
              return;
         }
 
-        // Handle Sync Events based on player type
         if (data.type === 'source') {
              loadVideo(data.playerType, data.src);
              appendMessage(`Source changed to ${data.playerType}`, false);
@@ -225,7 +255,7 @@ document.addEventListener("DOMContentLoaded", () => {
             switch (data.type) {
                 case 'play':
                     video.currentTime = data.time;
-                    video.play();
+                    video.play().catch(e => console.log("Autoplay blocked:", e));
                     break;
                 case 'pause':
                     video.currentTime = data.time;
@@ -238,7 +268,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     alert("The host has selected a local video file. Please select the same file to synchronize playback.");
                     newMessage.textContent = "The host has selected a local video file. Please select the same file to synchronize playback.";
                     chatBox.appendChild(newMessage.cloneNode(true));
-                    // Switch to html5 player mode
                     loadVideo('html5', '');
                     break;
             }
@@ -257,7 +286,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     break;
             }
         }
-        // Vidking has no sync support
     }
 
     function broadcast(data) {
@@ -277,7 +305,6 @@ document.addEventListener("DOMContentLoaded", () => {
             broadcast({ type: 'chat', message });
             appendMessage(message, true);
         } else if (message) {
-            // Echo local message
             appendMessage(message, true);
         }
         chatMessageInput.value = '';
@@ -286,6 +313,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function handleCommand(message) {
         if (message.startsWith('/create')){
             host = true;
+            updateHostControls(); // Enable controls for host
             chatBox.innerHTML = '';
             newMessage.textContent = "Room created. Share this ID with your friend: " + peerId;
             chatBox.appendChild(newMessage.cloneNode(true));
@@ -294,6 +322,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const parts = message.split(" ");
             const arg = parts[1];
             host = false;
+            updateHostControls(); // Disable controls for peer
             if (arg) {
                 if (conn) conn.close();
                 conn = peer.connect(arg);
@@ -328,7 +357,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (url.includes('youtube.com') || url.includes('youtu.be')) {
             type = 'youtube';
-            // Extract ID
             const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
             const match = url.match(regExp);
             if (match && match[2].length === 11) {
@@ -341,7 +369,6 @@ document.addEventListener("DOMContentLoaded", () => {
             type = 'vidking';
             src = url;
         } else {
-             // Default to generic source or error
              alert("Unsupported URL. Please use YouTube or Vidking.");
              return;
         }
@@ -383,7 +410,6 @@ document.addEventListener("DOMContentLoaded", () => {
         videoFileInput.click();
     });
 
-    // Settings Modal
     settingsToggleBtn.addEventListener("click", () => {
         settingsModal.style.display = "block";
     });
