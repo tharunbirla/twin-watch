@@ -150,6 +150,7 @@ svg:hover{
   border-radius: 10px;
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 .chat-container.open {
   width: 300px;
@@ -174,6 +175,9 @@ svg:hover{
   padding: 16px;
   overflow: hidden !important;
   border-bottom: 1px solid #f5f5f5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .dark-theme #chat-box .chat-header{
   background-color: #3C3F56;
@@ -246,6 +250,99 @@ svg:hover{
   background-color: #0056b3;
 }
 
+#close-chat-mobile {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+#close-chat-mobile svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* Modal Styling */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.5);
+}
+
+.modal-content {
+  background-color: var(--navigation-bg);
+  margin: 15% auto;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  width: 80%;
+  max-width: 500px;
+  color: var(--message-text);
+}
+
+.dark-theme .modal-content {
+  background-color: #3C3F56;
+  color: #ddd;
+}
+
+.close-modal {
+  color: #aaa;
+  float: right;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.close-modal:hover,
+.close-modal:focus {
+  color: #000;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.modal-section {
+    margin-bottom: 20px;
+}
+
+.modal-section h3 {
+    margin-top: 0;
+}
+
+.modal-section input {
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    background-color: var(--app-background);
+    color: var(--message-text);
+}
+
+.dark-theme .modal-section input {
+    background-color: #262a42;
+    border-color: #555;
+}
+
+.modal-section button {
+    background-color: var(--main-color);
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.dark-theme .modal-section button {
+    background-color: #6f74ff;
+}
+
+
 /* Mobile Responsiveness */
 @media (max-width: 768px) {
   body {
@@ -260,6 +357,7 @@ svg:hover{
     order: 2; /* Move to bottom */
     padding: 0;
     box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    z-index: 200; /* Ensure above everything else at bottom */
   }
 
   .navigation {
@@ -291,10 +389,10 @@ svg:hover{
 
   .video-container {
     padding: 0;
-    background-color: #000; /* Better for video on mobile */
+    background-color: #000;
   }
 
-  #video {
+  #video, #youtube-player, .vidking-embed {
     width: 100%;
     height: auto;
     max-height: 100%;
@@ -302,31 +400,30 @@ svg:hover{
   }
 
   .right-side {
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 100%;
-    width: 0; /* controlled by chat-container width */
-    margin: 0;
-  }
-
-  .chat-container.open {
-    width: 100vw;
-    height: 100%;
-    position: fixed; /* Fixed to cover everything except nav maybe? or cover nav too? */
+    position: fixed;
     top: 0;
     left: 0;
-    z-index: 100;
-    border-radius: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 300;
+    pointer-events: none;
   }
 
-  /* Make room for nav bar if we want chat above nav, or full screen.
-     If fixed top 0 left 0 h 100%, it covers nav.
-     If we want nav visible, use absolute in main-content.
-  */
+  .chat-container {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    transform: translateX(100%); /* Slide out */
+    transition: transform 0.3s ease-in-out;
+    pointer-events: all; /* Make chat interactive */
+  }
+
   .chat-container.open {
-     position: absolute;
-     width: 100%;
-     height: 100%;
+    transform: translateX(0); /* Slide in */
+  }
+
+  #close-chat-mobile {
+      display: block;
   }
 }
