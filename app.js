@@ -28,8 +28,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const chatContainer = document.getElementById("chat-container");
     const uploadVideoBtn = document.getElementById("upload-video");
     const newMessage = document.getElementById("status");
+    const closeChatMobileBtn = document.getElementById("close-chat-mobile");
+    const settingsToggleBtn = document.getElementById("settings-toggle");
+    const settingsModal = document.getElementById("settings-modal");
+    const closeSettingsBtn = document.getElementById("close-settings");
+    const streamUrlInput = document.getElementById("stream-url-input");
+    const streamUrlBtn = document.getElementById("stream-url-btn");
+    const videoContainer = document.getElementById("video-container");
 
     let peerId = '';
+    let playerType = 'html5'; // 'html5', 'youtube', 'vidking'
+    let youtubePlayer;
 
     peer.on('open', id => {
         peerId = id;
@@ -61,7 +70,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     peer.on('connection', connection => {
-        // Enforce single connection: Close existing if any
         if (conn) {
             conn.close();
         }
@@ -85,64 +93,171 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // --- Video Player Management ---
+
+    function loadVideo(type, src) {
+        playerType = type;
+
+        // Hide all players initially
+        video.style.display = 'none';
+        const ytElem = document.getElementById('youtube-player');
+        if (ytElem) ytElem.style.display = 'none';
+        // Clear Vidking iframe if exists
+        const oldVk = document.querySelector('.vidking-embed');
+        if (oldVk) oldVk.remove();
+
+        if (type === 'html5') {
+            video.style.display = 'block';
+            video.src = src;
+        } else if (type === 'youtube') {
+            if (ytElem) ytElem.style.display = 'block';
+            if (youtubePlayer && youtubePlayer.loadVideoById) {
+                youtubePlayer.loadVideoById(src);
+            } else {
+                createYouTubePlayer(src);
+            }
+        } else if (type === 'vidking') {
+            const iframe = document.createElement('iframe');
+            iframe.src = src;
+            iframe.className = 'vidking-embed';
+            iframe.allow = "autoplay; fullscreen";
+            iframe.style.width = '100%';
+            iframe.style.height = '100%';
+            iframe.style.border = 'none';
+            videoContainer.appendChild(iframe);
+        }
+    }
+
+    function createYouTubePlayer(videoId) {
+        // Destroy existing player if needed to reset
+        if (youtubePlayer && typeof youtubePlayer.destroy === 'function') {
+            youtubePlayer.destroy();
+        }
+
+        // Ensure the div exists
+        let ytContainer = document.getElementById('youtube-player');
+        if (!ytContainer) {
+             ytContainer = document.createElement('div');
+             ytContainer.id = 'youtube-player';
+             videoContainer.appendChild(ytContainer);
+        }
+        ytContainer.style.display = 'block';
+
+        if (window.YT && window.YT.Player) {
+            youtubePlayer = new YT.Player('youtube-player', {
+                height: '100%',
+                width: '100%',
+                videoId: videoId,
+                playerVars: {
+                    'playsinline': 1,
+                    'controls': 1
+                },
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                }
+            });
+        } else {
+            console.error("YouTube IFrame API not ready yet.");
+            // Retry logic could go here, but usually scripts load fast enough.
+            // Or use onYouTubeIframeAPIReady global callback.
+        }
+    }
+
+    function onPlayerReady(event) {
+        // Player is ready
+    }
+
+    function onPlayerStateChange(event) {
+        if (!host) return; // Only host broadcasts events
+
+        if (event.data === YT.PlayerState.PLAYING) {
+             broadcast({ type: 'play', time: youtubePlayer.getCurrentTime() });
+        } else if (event.data === YT.PlayerState.PAUSED) {
+             broadcast({ type: 'pause', time: youtubePlayer.getCurrentTime() });
+        }
+    }
+
+    // HTML5 Video Events
+    video.addEventListener("play", () => {
+        if (host && playerType === 'html5') {
+            broadcast({ type: 'play', time: video.currentTime });
+        }
+    });
+
+    video.addEventListener("pause", () => {
+        if (host && playerType === 'html5') {
+            broadcast({ type: 'pause', time: video.currentTime });
+        }
+    });
+
+    video.addEventListener("seeked", () => {
+        if (host && playerType === 'html5') {
+            broadcast({ type: 'seek', time: video.currentTime });
+        }
+    });
+
     videoFileInput.addEventListener("change", () => {
         const file = videoFileInput.files[0];
         if (file) {
             const fileURL = URL.createObjectURL(file);
-            video.src = fileURL;
+            loadVideo('html5', fileURL);
             if (host) {
                 broadcast({ type: 'file-selected' });
             }
         }
     });
 
-    video.addEventListener("play", () => {
-        if (host) {
-            broadcast({ type: 'play', time: video.currentTime });
-        }
-    });
-
-    video.addEventListener("pause", () => {
-        if (host) {
-            broadcast({ type: 'pause', time: video.currentTime });
-        }
-    });
-
-    video.addEventListener("seeked", () => {
-        if (host) {
-            broadcast({ type: 'seek', time: video.currentTime });
-        }
-    });
-
-    video.addEventListener("loadedmetadata", () => {
-        if (!host) {
-            video.controls = false;
-            video.classList.add('client-video')
-        }
-    });
-
     function handleData(data) {
-        switch (data.type) {
-            case 'play':
-                video.currentTime = data.time;
-                video.play();
-                break;
-            case 'pause':
-                video.currentTime = data.time;
-                video.pause();
-                break;
-            case 'seek':
-                video.currentTime = data.time;
-                break;
-            case 'file-selected':
-                alert("The host has selected a video file. Please select the same file to synchronize playback.");
-                newMessage.textContent = "The host has selected a video file. Please select the same file to synchronize playback.";
-                chatBox.appendChild(newMessage.cloneNode(true));
-                break;
-            case 'chat':
-                appendMessage(data.message, false);
-                break;
+        if (data.type === 'chat') {
+             appendMessage(data.message, false);
+             return;
         }
+
+        // Handle Sync Events based on player type
+        if (data.type === 'source') {
+             loadVideo(data.playerType, data.src);
+             appendMessage(`Source changed to ${data.playerType}`, false);
+             return;
+        }
+
+        if (playerType === 'html5') {
+            switch (data.type) {
+                case 'play':
+                    video.currentTime = data.time;
+                    video.play();
+                    break;
+                case 'pause':
+                    video.currentTime = data.time;
+                    video.pause();
+                    break;
+                case 'seek':
+                    video.currentTime = data.time;
+                    break;
+                case 'file-selected':
+                    alert("The host has selected a local video file. Please select the same file to synchronize playback.");
+                    newMessage.textContent = "The host has selected a local video file. Please select the same file to synchronize playback.";
+                    chatBox.appendChild(newMessage.cloneNode(true));
+                    // Switch to html5 player mode
+                    loadVideo('html5', '');
+                    break;
+            }
+        } else if (playerType === 'youtube' && youtubePlayer && typeof youtubePlayer.seekTo === 'function') {
+             switch (data.type) {
+                case 'play':
+                    youtubePlayer.seekTo(data.time, true);
+                    youtubePlayer.playVideo();
+                    break;
+                case 'pause':
+                    youtubePlayer.seekTo(data.time, true);
+                    youtubePlayer.pauseVideo();
+                    break;
+                case 'seek':
+                    youtubePlayer.seekTo(data.time, true);
+                    break;
+            }
+        }
+        // Vidking has no sync support
     }
 
     function broadcast(data) {
@@ -151,78 +266,90 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // --- Chat & Commands ---
+
     sendMessageBtn.addEventListener("click", () => {
         const message = chatMessageInput.value;
+
+        if (message.startsWith('/')) {
+            handleCommand(message);
+        } else if (message && conn && conn.open) {
+            broadcast({ type: 'chat', message });
+            appendMessage(message, true);
+        } else if (message) {
+            // Echo local message
+            appendMessage(message, true);
+        }
+        chatMessageInput.value = '';
+    });
+
+    function handleCommand(message) {
         if (message.startsWith('/create')){
             host = true;
             chatBox.innerHTML = '';
             newMessage.textContent = "Room created. Share this ID with your friend: " + peerId;
             chatBox.appendChild(newMessage.cloneNode(true));
-            chatMessageInput.value = '';
         }
-        if (message.startsWith('/join')) {
+        else if (message.startsWith('/join')) {
             const parts = message.split(" ");
             const arg = parts[1];
             host = false;
-            if (arg && !host) {
-                if (conn) {
-                    conn.close();
-                }
+            if (arg) {
+                if (conn) conn.close();
                 conn = peer.connect(arg);
                 conn.on('open', () => {
                     setupConnection();
                     chatBox.innerHTML = '';
                     newMessage.textContent = "Connected to the room: " + arg
                     chatBox.appendChild(newMessage.cloneNode(true));
-                    chatMessageInput.value = '';
                 });
                 conn.on('error', (err) => {
                     console.error("Connection attempt error:", err);
-                    chatBox.innerHTML = '';
                     newMessage.textContent = "Error occurred while connecting. Try again.";
                     chatBox.appendChild(newMessage.cloneNode(true));
-                    chatMessageInput.value = '';
                 });
-            } else {
-                chatBox.innerHTML = '';
-                newMessage.textContent = "Invalid or missing invite code.";
-                chatBox.appendChild(newMessage.cloneNode(true));
-                chatMessageInput.value = '';
             }
         }
-        if (message.startsWith('/leave')) {
-            if (conn && !host) {
-                if (conn) conn.close();
-                chatBox.innerHTML = '';
-                newMessage.textContent = "You have left the room.";
+        else if (message.startsWith('/source')) {
+            if (!host) {
+                newMessage.textContent = "Only host can set the source.";
                 chatBox.appendChild(newMessage.cloneNode(true));
-                chatMessageInput.value = '';
-            } else {
-                newMessage.textContent = "You are the host and cannot leave the room.";
-                chatMessageInput.value = '';
-                chatBox.appendChild(newMessage.cloneNode(true));
+                return;
             }
+            const parts = message.split(" ");
+            const url = parts[1];
+            processStreamUrl(url);
         }
-        if (message.startsWith('/status')) {
-            if (!conn || !conn.open) {
-                newMessage.textContent = "Status: Disconnected";
+    }
+
+    function processStreamUrl(url) {
+        let type = '';
+        let src = '';
+
+        if (url.includes('youtube.com') || url.includes('youtu.be')) {
+            type = 'youtube';
+            // Extract ID
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+            const match = url.match(regExp);
+            if (match && match[2].length === 11) {
+                src = match[2];
             } else {
-                newMessage.textContent = "Status: Connected";
+                alert("Invalid YouTube URL");
+                return;
             }
-            chatBox.appendChild(newMessage.cloneNode(true));
-            chatMessageInput.value = '';
+        } else if (url.includes('vidking.net')) {
+            type = 'vidking';
+            src = url;
+        } else {
+             // Default to generic source or error
+             alert("Unsupported URL. Please use YouTube or Vidking.");
+             return;
         }
-        if (message.startsWith('/info') && host) {
-            newMessage.textContent = "Your are the host: " + peerId ;
-            chatBox.appendChild(newMessage.cloneNode(true));
-            chatMessageInput.value = '';
-        }
-        if (message && conn && conn.open && !message.startsWith('/')) {
-            broadcast({ type: 'chat', message });
-            appendMessage(message, true);
-            chatMessageInput.value = '';
-        }
-    });
+
+        loadVideo(type, src);
+        broadcast({ type: 'source', playerType: type, src: src });
+        appendMessage(`Source changed to ${type}`, true);
+    }
 
     chatMessageInput.addEventListener("keypress", event => {
         if (event.key === "Enter") {
@@ -238,8 +365,14 @@ document.addEventListener("DOMContentLoaded", () => {
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    // --- UI Event Listeners ---
+
     toggleChatBtn.addEventListener("click", () => {
         chatContainer.classList.toggle('open');
+    });
+
+    closeChatMobileBtn.addEventListener("click", () => {
+        chatContainer.classList.remove('open');
     });
 
     themeToggleBtn.addEventListener("click", () => {
@@ -250,63 +383,61 @@ document.addEventListener("DOMContentLoaded", () => {
         videoFileInput.click();
     });
 
+    // Settings Modal
+    settingsToggleBtn.addEventListener("click", () => {
+        settingsModal.style.display = "block";
+    });
+
+    closeSettingsBtn.addEventListener("click", () => {
+        settingsModal.style.display = "none";
+    });
+
+    window.addEventListener('click', function(event) {
+        if (event.target == settingsModal) {
+            settingsModal.style.display = "none";
+        }
+    });
+
+    streamUrlBtn.addEventListener("click", () => {
+        const url = streamUrlInput.value;
+        if (url) {
+            if (host) {
+                 processStreamUrl(url);
+                 settingsModal.style.display = "none";
+                 streamUrlInput.value = '';
+            } else {
+                alert("Only the host can change the stream source.");
+            }
+        }
+    });
+
     fullscreenToggleBtn.addEventListener("click", () => {
         if (!document.fullscreenElement) {
-            if (video.requestFullscreen) {
-                video.requestFullscreen();
-            } else if (video.mozRequestFullScreen) { // Firefox
-                video.mozRequestFullScreen();
-            } else if (video.webkitRequestFullscreen) { // Chrome, Safari and Opera
-                video.webkitRequestFullscreen();
-            } else if (video.msRequestFullscreen) { // IE/Edge
-                video.msRequestFullscreen();
+             const elem = videoContainer;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.mozRequestFullScreen) {
+                elem.mozRequestFullScreen();
+            } else if (elem.webkitRequestFullscreen) {
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) {
+                elem.msRequestFullscreen();
             }
         } else {
             if (document.exitFullscreen) {
                 document.exitFullscreen();
-            } else if (document.mozCancelFullScreen) { // Firefox
-                document.mozCancelFullScreen();
-            } else if (document.webkitExitFullscreen) { // Chrome, Safari and Opera
-                document.webkitExitFullscreen();
-            } else if (document.msExitFullscreen) { // IE/Edge
-                document.msExitFullscreen();
             }
         }
     });
 
     document.addEventListener('fullscreenchange', () => {
         if (!host && document.fullscreenElement) {
-            video.setAttribute("controls","false");
-            video.removeAttribute('controls');
-            video.setAttribute("playsinline","true");
-            video.style.pointerEvents = "none"
-        }
-    });
-
-    document.addEventListener('mozfullscreenchange', () => {
-        if (!host && document.mozFullScreen) {
-            video.setAttribute("controls","false");
-            video.removeAttribute('controls');
-            video.setAttribute("playsinline","true");
-            video.style.pointerEvents = "none"
-        }
-    });
-
-    document.addEventListener('webkitfullscreenchange', () => {
-        if (!host && document.webkitIsFullScreen) {
-            video.setAttribute("controls","false");
-            video.removeAttribute('controls');
-            video.setAttribute("playsinline","true");
-            video.style.pointerEvents = "none"
-        }
-    });
-
-    document.addEventListener('msfullscreenchange', () => {
-        if (!host && document.msFullscreenElement) {
-            video.setAttribute("controls","false");
-            video.removeAttribute('controls');
-            video.setAttribute("playsinline","true");
-            video.style.pointerEvents = "none"
+             video.setAttribute("controls","false");
+             video.removeAttribute('controls');
+             video.setAttribute("playsinline","true");
+             if (playerType === 'html5') {
+                video.style.pointerEvents = "none";
+             }
         }
     });
 });
