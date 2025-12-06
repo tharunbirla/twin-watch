@@ -16,7 +16,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let host = false;
 
     const video = document.getElementById("video");
-    // const createRoomBtn = document.getElementById("create-room");
     const joinRoomBtn = document.getElementById("join-room");
     const roomIdInput = document.getElementById("room-id");
     const videoFileInput = document.getElementById("video-file");
@@ -62,6 +61,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     peer.on('connection', connection => {
+        // Enforce single connection: Close existing if any
+        if (conn) {
+            conn.close();
+        }
         conn = connection;
         setupConnection();
         newMessage.textContent = "A new user has connected.";
@@ -81,22 +84,6 @@ document.addEventListener("DOMContentLoaded", () => {
             chatBox.appendChild(newMessage.cloneNode(true));
         });
     }
-
-    // createRoomBtn.addEventListener("click", () => {
-    //     host = true;
-    //     alert(`Room created. Share this ID with your friend: ${peerId}`);
-            // newMessage.textContent = "Room created. Share this ID with your friend: " + peerId;
-            // chatBox.appendChild(newMessage);
-    // });
-
-    // joinRoomBtn.addEventListener("click", () => {
-    //     const roomId = roomIdInput.value;
-    //     conn = peer.connect(roomId);
-    //     conn.on('open', () => {
-    //         console.log("Connected to host");
-    //         conn.on('data', handleData);
-    //     });
-    // });
 
     videoFileInput.addEventListener("change", () => {
         const file = videoFileInput.files[0];
@@ -178,6 +165,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const arg = parts[1];
             host = false;
             if (arg && !host) {
+                if (conn) {
+                    conn.close();
+                }
                 conn = peer.connect(arg);
                 conn.on('open', () => {
                     setupConnection();
@@ -249,11 +239,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     toggleChatBtn.addEventListener("click", () => {
-        if (chatContainer.style.width === '0px') {
-            chatContainer.style.width = '300px';
-        } else {
-            chatContainer.style.width = '0px';
-        }
+        chatContainer.classList.toggle('open');
     });
 
     themeToggleBtn.addEventListener("click", () => {
